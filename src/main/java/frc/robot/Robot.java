@@ -28,6 +28,10 @@ public class Robot extends TimedRobot {
 
     private ColorSensorV3 colorSensor = new ColorSensorV3(COLOR_SENSOR_PORT);
 
+    private double baseRed, baseGreen, baseBlue, currentRed, currentGreen, currentBlue;
+    private int proximity;
+
+
     @Override
     public void robotInit() {
     }
@@ -49,7 +53,7 @@ public class Robot extends TimedRobot {
 
     @Override
     public void teleopInit() {
-
+      
     }
 
     @Override
@@ -90,21 +94,47 @@ public class Robot extends TimedRobot {
 
         double IR = colorSensor.getIR();
           
-        SmartDashboard.putNumber("Red", detectedColor.red);
-      
-        SmartDashboard.putNumber("Green", detectedColor.green);
-      
+        SmartDashboard.putNumber("Red", currentRed);
+        SmartDashboard.putNumber("Green", currentGreen);
         SmartDashboard.putNumber("Blue", detectedColor.blue);
-      
         SmartDashboard.putNumber("IR", IR);     
-        int proximity = colorSensor.getProximity();
       
         SmartDashboard.putNumber("Proximity", proximity);
 
+        currentRed = detectedColor.red;
+        currentGreen = detectedColor.green;
+        currentBlue = detectedColor.blue;
+        proximity = colorSensor.getProximity();
+        
         if(colorSensor.getProximity() > 500){
           colorMotor.set(0.5);
         }
         else{
+          colorMotor.set(0);
+        }
+
+        // red ball =
+        // red: 0.53
+        // green: 0.35
+        // blue: 0.11
+        // ir: 35
+        // proximity: 676
+
+        // blue ball = 
+        // red: 0.15
+        // blue: 0.43 max, 0.25 starting
+        // green: 0.40
+        // proximity: 760
+
+        if (proximity > 120) {
+          if (currentBlue > 0.35) {
+            // blue ball is starting to enter, accept and keep motor running
+            colorMotor.set(0.05);
+          } else if (currentRed > 0.35) {
+            // red ball is starting to enter, reject and reverse motor
+            colorMotor.set(-0.05);
+          }
+        } else {
           colorMotor.set(0);
         }
       
