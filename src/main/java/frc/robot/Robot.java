@@ -1,21 +1,12 @@
 package frc.robot;
 
-import com.ctre.phoenix.motorcontrol.ControlMode;
-import com.ctre.phoenix.motorcontrol.can.TalonSRX;
-import com.kauailabs.navx.frc.AHRS;
 import com.revrobotics.CANSparkMax;
 import com.revrobotics.CANSparkMaxLowLevel;
-import com.revrobotics.ColorMatch;
 import com.revrobotics.ColorSensorV3;
 
+import edu.wpi.first.wpilibj.DigitalInput;
 import edu.wpi.first.wpilibj.I2C;
-import edu.wpi.first.wpilibj.Joystick;
-import edu.wpi.first.wpilibj.SPI;
 import edu.wpi.first.wpilibj.TimedRobot;
-import edu.wpi.first.wpilibj.XboxController;
-import edu.wpi.first.math.geometry.Rotation2d;
-import edu.wpi.first.wpilibj.interfaces.Gyro;
-import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj.util.Color;
 
@@ -24,6 +15,8 @@ public class Robot extends TimedRobot {
 
     // TalonSRX colorMotor = new TalonSRX(2);
     CANSparkMax colorMotor = new CANSparkMax(8, CANSparkMaxLowLevel.MotorType.kBrushless);
+    CANSparkMax intakeMotor = new CANSparkMax(7, CANSparkMaxLowLevel.MotorType.kBrushless);
+    DigitalInput photoElectric = new DigitalInput(0);
 
 
     private ColorSensorV3 colorSensor = new ColorSensorV3(COLOR_SENSOR_PORT);
@@ -101,17 +94,19 @@ public class Robot extends TimedRobot {
       
         SmartDashboard.putNumber("Proximity", proximity);
 
+        SmartDashboard.putBoolean("tripped", photoElectric.get());
+
         currentRed = detectedColor.red;
         currentGreen = detectedColor.green;
         currentBlue = detectedColor.blue;
         proximity = colorSensor.getProximity();
         
-        if(colorSensor.getProximity() > 500){
-          colorMotor.set(0.5);
-        }
-        else{
-          colorMotor.set(0);
-        }
+        //if(colorSensor.getProximity() > 500){
+        //  colorMotor.set(0.5);
+        //}
+        //else{
+        //  colorMotor.set(0);
+        //}
 
         // red ball =
         // red: 0.53
@@ -129,10 +124,20 @@ public class Robot extends TimedRobot {
         if (proximity > 120) {
           if (currentBlue > 0.35) {
             // blue ball is starting to enter, accept and keep motor running
-            colorMotor.set(0.05);
+            colorMotor.set(-0.3);
+
+            // run other motor
+            intakeMotor.set(0.3);
+
+            while (photoElectric.get()) {}
+
+            intakeMotor.set(0);
+            colorMotor.set(0);
           } else if (currentRed > 0.35) {
             // red ball is starting to enter, reject and reverse motor
-            colorMotor.set(-0.05);
+            colorMotor.set(0.3);
+          } else {
+            colorMotor.set(0);
           }
         } else {
           colorMotor.set(0);
