@@ -4,9 +4,14 @@ import static frc.robot.Constants.ACCEPTOR_MOTOR_PORT;
 import static frc.robot.Constants.ACCEPTOR_PHOTO_ELECTRIC_PORT;
 import static frc.robot.Constants.COLOR_SENSOR_PORT;
 import static frc.robot.Constants.DEFAULT_MOTOR_TYPE;
+import static frc.robot.Constants.RESET_JOY_PORT;
 import static frc.robot.Constants.SHOOTER_MOTOR_PORT;
+import static frc.robot.Constants.SHOOT_JOY_PORT;
 import static frc.robot.Constants.STORAGE_MOTOR_PORT;
 import static frc.robot.Constants.STORAGE_PHOTO_ELECTRIC_PORT;
+import static frc.robot.Constants.RED_THRESHOLD;
+import static frc.robot.Constants.BLUE_THRESHOLD;
+import static frc.robot.Constants.PROXIMITY_THRESHOLD;
 
 import java.util.concurrent.TimeUnit;
 
@@ -28,9 +33,9 @@ public class Robot extends TimedRobot {
     private Color color;
 
     private DigitalInput acceptorSensor, storageSensor;
-    private RelativeEncoder acceptorMotorEncoder, storageMotorEncoder;
+    private RelativeEncoder acceptorMotorEncoder, storageMotorEncoder, shooterEncoder;
 
-    private double proximity, acceptorCurrent, storageCurrent, storageRPM, acceptorRPM;
+    private double proximity, acceptorCurrent, storageCurrent, storageRPM, acceptorRPM, shooterCurrent, shooterRPM;
 
     private int ballsLoaded = 0;
 
@@ -38,12 +43,13 @@ public class Robot extends TimedRobot {
     private final boolean currentMeasuringEnabled = true;
 
     // Maximum speed the motors will spin, good for testing.
-    private final double motorSpeed = 0.3;
+    private final double shootSpeed = 1.0;
+    private final double acceptSpeed = 0.3;
 
     // Adjust the stall current (Amps) and stall RPM (velocity) based on the motor possibly
     private final double stallCurrent = 80, stallRPM = 2000;
 
-    private final boolean acceptorFlipped = false;
+    private final boolean acceptorFlipped = true;
     private final boolean storageFlipped = false;
     private final boolean shooterFlipped = false;
 
@@ -75,8 +81,12 @@ public class Robot extends TimedRobot {
         storageSensor = new DigitalInput(STORAGE_PHOTO_ELECTRIC_PORT);
         acceptorMotorEncoder = acceptorMotor.getEncoder();
         storageMotorEncoder = storageMotor.getEncoder();
+        shooterEncoder = shooterMotor.getEncoder();
 
         updateSensors();
+
+        // reset everything
+        ballsLoaded = 0;
     }
 
     public boolean isStalled(CANSparkMax motor) {
@@ -117,60 +127,122 @@ public class Robot extends TimedRobot {
                     }
                     motor.set(0);
                 } catch (InterruptedException e) {}
+                Thread.currentThread().interrupt();
             }
         }).start();
     }
 
-    public void activateShooter() {
-        runMotorTimed(shooterMotor, getMotorValue(motorSpeed, shooterFlipped), 2000);
-        // Possibly run the storage motor slightly as well?
-    }
+    boolean shootingDone = false;
 
-    public void checkBall() {
+    public void activateShooter(double speed) {
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    if (proximity > 120) {
-                        if (color.blue > 0.35) {
-                            if (ballsLoaded == 0) {
-                                acceptorMotor.set(getMotorValue(motorSpeed, acceptorFlipped));
-                                storageMotor.set(getMotorValue(motorSpeed, storageFlipped));
+                    // Change this line before testing or it will not be good!!!!!!
+                    runMotorTimed(shooterMotor, getMotorValue(speed, shooterFlipped), 3000);
+                    
+                    while (Math.abs(shooterEncoder.getVelocity()) < 4000) {
+                        SmartDashboard.putBoolean("loop running", true);
+                    }
 
-                                // Add a delay before checking for stall current to reduce the possibility of the
-                                // extra power and low speed of starting the motor to activate the protection.
-                                TimeUnit.MILLISECONDS.sleep(100);
+                    SmartDashboard.putBoolean("loop running", false);
+                    TimeUnit.MILLISECONDS.sleep(500);
+        
+                    // While sensor is activated (reverse), drive storage motor
+                    storageMotor.set(getMotorValue(acceptSpeed-0.1, acceptorFlipped));
 
-                                while (!storageSensor.get() && !isStalled(acceptorMotor) && !isStalled(storageMotor)) {
-                                    acceptorMotor.set(getMotorValue(motorSpeed, acceptorFlipped));
-                                    storageMotor.set(getMotorValue(motorSpeed, storageFlipped));
+                    while (!storageSensor.get() && !isStalled(storageMotor)) {
+                        storageMotor.set(getMotorValue(acceptSpeed-0.1, storageFlipped));
+                    }
+                    
+                    TimeUnit.MILLISECONDS.sleep(200);
+                    storageMotor.set(0);
+
+                    shootingDone = true;
+
+                    Thread.currentThread().interrupt();
+                } catch (Exception e) { shootingDone = true; Thread.currentThread().interrupt(); }
+            }
+        }).start();
+    }
+
+    public void shootTwice() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                // shoot two times with a delay
+                shootingDone = false;
+                activateShooter(shootSpeed);
+                while (!shootingDone) {}
+                activateShooter(shootSpeed);
+                shootingDone = true;
+                Thread.currentThread().interrupt();
+            }
+        }).start();
+    }
+
+    public void checkBall() {
+        // Everything should run seperately to prevent the updateSensors method to not work.
+
+        // todo: make color senor more sensitive
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (proximity > PROXIMITY_THRESHOLD) {
+                        if (color.blue > BLUE_THRESHOLD) {
+                            switch (ballsLoaded) {
+                                case 0: {
+                                    acceptorMotor.set(getMotorValue(acceptSpeed, acceptorFlipped));
+                                    storageMotor.set(getMotorValue(acceptSpeed, storageFlipped));
+
+                                    // Add a delay before checking for stall current to reduce the possibility of the
+                                    // extra power and low speed of starting the motor to activate the protection.
+                                    TimeUnit.MILLISECONDS.sleep(100);
+
+                                    while (storageSensor.get() && !isStalled(acceptorMotor) && !isStalled(storageMotor)) {
+                                        acceptorMotor.set(getMotorValue(0.3, acceptorFlipped));
+                                        storageMotor.set(getMotorValue(0.2, storageFlipped));
+                                    }
                                 }
-                            } else if (ballsLoaded == 1) {
-                                acceptorMotor.set(getMotorValue(motorSpeed, acceptorFlipped));
+                                case 1: {
+                                    acceptorMotor.set(getMotorValue(acceptSpeed, acceptorFlipped));
 
-                                TimeUnit.MILLISECONDS.sleep(100);
+                                    TimeUnit.MILLISECONDS.sleep(100);
                                 
-                                while (!acceptorSensor.get() && !isStalled(acceptorMotor)) {
-                                    acceptorMotor.set(getMotorValue(motorSpeed, acceptorFlipped));
+                                    while (acceptorSensor.get() && !isStalled(acceptorMotor)) {
+                                        acceptorMotor.set(getMotorValue(0.3, acceptorFlipped));
+                                    }
+                                    TimeUnit.MILLISECONDS.sleep(250);
                                 }
-                            } else if (ballsLoaded > 1) {
-                                // There is more than one ball added to the system, do nothing.
+                                default: {}
                             }
-
+                        
                             // This should run after the sensor loops are finished, stop the motors.
                             acceptorMotor.set(0);
                             storageMotor.set(0);
-                        } else if (color.red > 0.35) {
-                            acceptorMotor.set(getMotorValue(-motorSpeed, acceptorFlipped));
+
+                        } else if (color.red > RED_THRESHOLD) {
+                            acceptorMotor.set(getMotorValue((-acceptSpeed)-0.1, acceptorFlipped));
+                            TimeUnit.MILLISECONDS.sleep(250);
                         } else {
                             acceptorMotor.set(0);
                         }
                     } else {
                         acceptorMotor.set(0);
                     }
-                } catch (InterruptedException e) {}
+                } catch (InterruptedException e) {
+                    SmartDashboard.putBoolean("storage exception", true);
+                    Thread.currentThread().interrupt();
+                }
             }
         }).start();
+    }
+
+    private void resetErrors() {
+        SmartDashboard.putBoolean("jammed", false);
+        SmartDashboard.putBoolean("storage exception", false);
     }
 
     private void updateSensors() {
@@ -182,6 +254,9 @@ public class Robot extends TimedRobot {
 
         acceptorRPM = acceptorMotorEncoder.getVelocity();
         storageRPM = storageMotorEncoder.getVelocity();
+
+        shooterRPM = shooterEncoder.getVelocity();
+        shooterCurrent = shooterMotor.getOutputCurrent();
 
         // Values that we may need for testing
         SmartDashboard.putNumber("red", color.red);
@@ -195,28 +270,34 @@ public class Robot extends TimedRobot {
         SmartDashboard.putNumber("acceptor amps", acceptorCurrent);
         SmartDashboard.putNumber("storage amps", storageCurrent);
 
+        SmartDashboard.putNumber("shooter rpm", shooterRPM);
+        SmartDashboard.putNumber("shooter amps", shooterCurrent);
+
         SmartDashboard.putNumber("acceptor rpm", acceptorRPM);
         SmartDashboard.putNumber("storage rpm", storageRPM);
 
         SmartDashboard.putNumber("balls loaded", ballsLoaded);
 
-        if (storageSensor.get()) {
+        
+        if (!storageSensor.get()) {
             // If the storage sensor (rear) is covered, we know there is a ball inside of it.
             ballsLoaded = 1;
 
-            if (acceptorSensor.get()) {
+            if (!acceptorSensor.get()) {
                 // In addition, if the other sensor (front) is covered, there are two balls and can't accept more.
                 ballsLoaded = 2;
             }
         } else {
             ballsLoaded = 0;
         }
+    
     }
 
     @Override
     public void teleopInit() {
-        SmartDashboard.putBoolean("storage ready", true);
+        SmartDashboard.putBoolean("storage exception", false);
         SmartDashboard.putBoolean("jammed", false);
+        SmartDashboard.putBoolean("loop running", false);
     }
 
     @Override
@@ -224,8 +305,16 @@ public class Robot extends TimedRobot {
         updateSensors();
         checkBall();
 
-        if (joystick.getRawButtonPressed(9)) {
-            activateShooter();
+        if (joystick.getRawButtonPressed(SHOOT_JOY_PORT)) {
+            activateShooter(shootSpeed);
+        }
+
+        if (joystick.getRawButtonPressed(RESET_JOY_PORT)) {
+            resetErrors();
+        }
+
+        if (joystick.getRawButtonPressed(6)) {
+            shootTwice();
         }
     }
 }
